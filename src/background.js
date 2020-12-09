@@ -1,6 +1,16 @@
-import { app, protocol, BrowserWindow } from 'electron';
+import { app, protocol, BrowserWindow, nativeTheme, ipcMain } from 'electron';
 import { createProtocol } from 'vue-cli-plugin-electron-builder/lib';
 import installExtension, { VUEJS_DEVTOOLS } from 'electron-devtools-installer';
+const path = require("path");
+
+// updater
+import { autoUpdater } from "electron-updater"
+const log = require("electron-log")
+
+let win;
+
+log.transports.file.level = "info" // "debug" "info"
+autoUpdater.logger = log
 
 const isDevelopment = process.env.NODE_ENV !== 'production';
 
@@ -9,15 +19,26 @@ protocol.registerSchemesAsPrivileged([
   { scheme: 'app', privileges: { secure: true, standard: true } },
 ]);
 
+app.whenReady().then(() => {
+  protocol.registerFileProtocol('file', (request, callback) => {
+    const pathname = decodeURI(request.url.replace('file:///', ''));
+    callback(pathname);
+  });
+});
+
 async function createWindow() {
   // Create the browser window.
-  const win = new BrowserWindow({
+  win = new BrowserWindow({
     width: 800,
     height: 600,
+    autoHideMenuBar: true,
+    frame: false,
     webPreferences: {
-      // Use pluginOptions.nodeIntegration, leave this alone
-      // See nklayman.github.io/vue-cli-plugin-electron-builder/guide/security.html#node-integration for more info
-      nodeIntegration: process.env.ELECTRON_NODE_INTEGRATION,
+      nodeIntegration: true,
+      backgroundThrottling: false,
+      webSecurity: false,
+      enableRemoteModule: true,
+      nodeIntegrationInWorker: true
     },
   });
 
@@ -76,3 +97,44 @@ if (isDevelopment) {
     });
   }
 }
+
+app.on('ready', function()  {
+  autoUpdater.checkForUpdatesAndNotify();
+});
+autoUpdater.on('checking-for-update', () => {
+  sendStatusToWindow('Checking for update...');
+})
+autoUpdater.on('update-available', (info) => {
+  sendStatusToWindow('Update available.');
+})
+autoUpdater.on('update-not-available', (info) => {
+  sendStatusToWindow('Update not available.');
+})
+autoUpdater.on('error', (err) => {
+  sendStatusToWindow('Error in auto-updater. ' + err);
+})
+autoUpdater.on('download-progress', (progressObj) => {
+  let log_message = "Download speed: " + progressObj.bytesPerSecond;
+  log_message = log_message + ' - Downloaded ' + progressObj.percent + '%';
+  log_message = log_message + ' (' + progressObj.transferred + "/" + progressObj.total + ')';
+  sendStatusToWindow(log_message);
+})
+autoUpdater.on('update-downloaded', (info) => {
+  sendStatusToWindow('Update downloaded');
+});
+function sendStatusToWindow(text) {
+  log.info(text);
+  win.webContents.send('message', text);
+}
+
+//두번째 앱실행시 이벤트 발생
+app.on('second-instance', (event, commandLine, workingDirectory) => {
+  if (win) {
+      if (win.isMinimized()) {
+        win.restore();
+      } else if (!win.isVisible()) {
+        win.show();
+      }
+      win.focus();
+  }
+});
